@@ -1,23 +1,23 @@
 """
 SAM3 Mask Extractor for LichtFeld Studio / Gaussian Splatting
 =============================================================
-Generates per-group masks (one folder per subject) plus a union folder for COLMAP.
+Generates per-group masks (one folder per subject)
 
 Requirements:
     pip install ultralytics>=8.3.237
     pip uninstall clip -y
     pip install git+https://github.com/ultralytics/CLIP.git
 
-    Install torch version according to CUDA arch
+    Re-install torch version according to CUDA arch, ignore if running CPU
 
     SAM3 weights: request access at https://huggingface.co/facebook/sam3
-    Place sam3.pt in your working directory or pass --checkpoint path/to/sam3.pt
+
 
 Usage:
     python extract_masks_sam3.py \
         --image ./images/ \
         --group plants "crop plants" \
-        --group ground "soil" "dirt" \
+        --group persons "person" "human" \
         --fill-holes \
         --dilate 8 \
         --out ./masks
@@ -25,33 +25,12 @@ Usage:
 
 Output:
     masks/
-    ├── colmap/          ← union of ALL groups — use this for COLMAP feature extraction
-    │   ├── img_0.jpg.png
-    │   └── ...
     ├── plants/          ← plants only — LichtFeld training run 1
     │   ├── img_0.jpg.png
     │   └── ...
-    └── ground/          ← ground only — LichtFeld training run 2
+    └── persons/         ← persons only — LichtFeld training run 2
         ├── img_0.jpg.png
         └── ...
-
-Workflow:
-    # 1. Generate masks
-    python extract_masks_sam3.py --image ./images/ \\
-        --group plants "crop plants" "leaves" \\
-        --group ground "soil" "dirt"
-
-    # 2. Run COLMAP with the union masks
-    colmap feature_extractor \\
-        --database_path scene/database.db \\
-        --image_path scene/images \\
-        --ImageReader.mask_path masks/colmap
-
-    # 3. Train a splat per group in LichtFeld
-    ./LichtFeld-Studio -d scene/ -o output/plants/ --mask-path masks/plants/
-    ./LichtFeld-Studio -d scene/ -o output/ground/ --mask-path masks/ground/
-
-    # 4. Overlay the two PLY files in LichtFeld Studio
 """
 
 import argparse
@@ -64,7 +43,7 @@ from PIL import Image
 from huggingface_hub import hf_hub_download
 
 
-def ensure_sam3():
+def ensure_sam3(checkpoint: str = "sam3.pt"):
     try:
         import ultralytics
         from packaging import version
@@ -75,8 +54,8 @@ def ensure_sam3():
             )
     except ImportError:
         sys.exit("Run: pip install ultralytics>=8.3.237")
-    if not Path("sam3.pt").exists():
-        hf_hub_download(repo_id="facebook/sam3", filename="sam3.pt", local_dir=".")
+    if not Path(checkpoint).exists():
+        hf_hub_download(repo_id="facebook/sam3", filename="sam3.pt", local_dir=str(Path(checkpoint).parent))
 
 
 def union_masks(masks: list[np.ndarray]) -> np.ndarray:
@@ -93,9 +72,8 @@ def save_mask(mask: np.ndarray, out_path: Path):
 
 # ── SAM3 inference ────────────────────────────────────────────────────────────
 
-def run_text_mode(predictor, image_path: str, prompts: list[str]) -> list[np.ndarray]:
-    orig_w, orig_h = Image.open(image_path).size
-
+def run_text_mode(predictor, image_path: str, prompts: list[str], orig_size: tuple[int, int]) -> list[np.ndarray]:
+    orig_w, orig_h = orig_size
     predictor.set_image(image_path)
     results = predictor(text=prompts)
 
@@ -117,16 +95,17 @@ def process_image(image_path: Path, groups: list[tuple[str, list[str]]],
     print(f"\n[SAM3] {image_path.name}")
     filename = image_path.name + ".png"  # COLMAP convention: img.jpg → img.jpg.png
 
+    img = Image.open(image_path)
+    orig_size = img.size  # (width, height)
     group_masks: dict[str, np.ndarray] = {}
 
     # Pass 1: run inference for all groups
     for group_name, prompts in groups:
         print(f"    [{group_name}] prompts: {prompts}")
-        masks = run_text_mode(predictor, str(image_path), prompts)
+        masks = run_text_mode(predictor, str(image_path), prompts, orig_size)
 
         if not masks:
             print(f"    [{group_name}] no masks found — writing empty mask")
-            img = Image.open(image_path)
             blank = np.zeros((img.height, img.width), dtype=bool)
             group_masks[group_name] = blank
         else:
@@ -149,14 +128,6 @@ def process_image(image_path: Path, groups: list[tuple[str, list[str]]],
         group_masks[group_name] = m
         save_mask(m, out_dir / group_name / filename)
 
-    # Union of all groups to the colmap folder
-    all_masks = list(group_masks.values())
-    colmap_mask = union_masks(all_masks)
-    if fill_holes or dilate:
-        colmap_mask = postprocess(colmap_mask, fill_holes, dilate)
-    save_mask(colmap_mask, out_dir / "colmap" / filename)
-    print(f"    [colmap] union saved")
-
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -174,7 +145,7 @@ class GroupAction(argparse.Action):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="SAM3 mask extractor — per-group folders + colmap union folder"
+        description="SAM3 mask extractor"
     )
     parser.add_argument("--image", required=True,
                         help="Image file or folder of images")
@@ -196,7 +167,7 @@ def main():
     if not args.groups:
         parser.error("Provide at least one --group, e.g.:\n"
                      "  --group plants 'crop plants' 'leaves'\n"
-                     "  --group ground 'soil' 'dirt'")
+                     "  --group persons 'person' 'human'")
 
     if torch.cuda.is_available():
         device = "cuda:0"
@@ -208,10 +179,10 @@ def main():
         device = "cpu"
         print("[device] WARNING: No GPU found, using CPU")
     user_approval = input("Continue? (y/n) ")
-    if not user_approval == "y":
+    if user_approval != "y":
         sys.exit()
 
-    ensure_sam3()
+    ensure_sam3(args.checkpoint)
 
     _start = time.time()
     from ultralytics.models.sam import SAM3SemanticPredictor
@@ -221,7 +192,6 @@ def main():
     out_dir = Path(args.out)
     for name, _ in args.groups:
         (out_dir / name).mkdir(parents=True, exist_ok=True)
-    (out_dir / "colmap").mkdir(parents=True, exist_ok=True)
 
     image_path = Path(args.image)
     if image_path.is_dir():
@@ -237,8 +207,7 @@ def main():
         sys.exit(f"Path not found: {args.image}")
 
     print(f"\nDone in {time.time() - _start:.1f} seconds!")
-    print("    Masks saved to:")
-    print(f"    {out_dir.resolve()}")
+    print(f"    Masks saved to:\n    {out_dir.resolve()}")
 
 if __name__ == "__main__":
     main()
