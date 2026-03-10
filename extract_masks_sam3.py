@@ -19,7 +19,6 @@ Usage:
         --group plants "crop plants" \
         --group persons "person" "human" \
         --fill-holes \
-        --dilate 8 \
         --out ./masks
 
 
@@ -41,6 +40,7 @@ import torch
 from pathlib import Path
 from PIL import Image
 from huggingface_hub import hf_hub_download
+from scipy.ndimage import binary_fill_holes
 
 
 def ensure_sam3(checkpoint: str = "sam3.pt"):
@@ -91,7 +91,7 @@ def run_text_mode(predictor, image_path: str, prompts: list[str], orig_size: tup
 # ── Per-image processing ──────────────────────────────────────────────────────
 
 def process_image(image_path: Path, groups: list[tuple[str, list[str]]],
-                  out_dir: Path, predictor, fill_holes: bool = False, dilate: int = 0):
+                  out_dir: Path, predictor, fill_holes: bool = False):
     print(f"\n[SAM3] {image_path.name}")
     filename = image_path.name + image_path.suffix  # COLMAP convention: img.jpg → img.jpg.jpg
 
@@ -113,13 +113,11 @@ def process_image(image_path: Path, groups: list[tuple[str, list[str]]],
             group_masks[group_name] = union_masks(masks)
 
     # Pass 2: postprocess, subtract other groups, save
-    if fill_holes or dilate:
-        from mask_utils import postprocess
     group_names = list(group_masks.keys())
     for group_name in group_names:
         m = group_masks[group_name]
-        if fill_holes or dilate:
-            m = postprocess(m, fill_holes, dilate)
+        if fill_holes:
+            m = binary_fill_holes(m)
         # Remove any pixels claimed by earlier (higher-priority) groups
         for other in group_names:
             if other == group_name:
@@ -160,8 +158,6 @@ def main():
                         help="Output root directory (default: ./masks)")
     parser.add_argument("--fill-holes", action="store_true",
                         help="Fill enclosed holes in each mask (e.g. rocks inside soil)")
-    parser.add_argument("--dilate", type=int, default=0, metavar="N",
-                        help="Morphological closing radius in pixels to bridge gaps (default: off)")
     args = parser.parse_args()
 
     if not args.groups:
@@ -200,9 +196,9 @@ def main():
         if not images:
             sys.exit(f"No images found in {image_path}")
         for img in images:
-            process_image(img, args.groups, out_dir, predictor, args.fill_holes, args.dilate)
+            process_image(img, args.groups, out_dir, predictor, args.fill_holes)
     elif image_path.is_file():
-        process_image(image_path, args.groups, out_dir, predictor, args.fill_holes, args.dilate)
+        process_image(image_path, args.groups, out_dir, predictor, args.fill_holes)
     else:
         sys.exit(f"Path not found: {args.image}")
 
