@@ -1,5 +1,6 @@
 # TODO
 + Separation of area segmentation and object segmentation
++ Preset groups for common cases (e.g. plants, people, tractors, etc.)
 
 # Main workflow (so far)
 Workflow:
@@ -18,6 +19,3 @@ Workflow:
     ./LichtFeld-Studio -d scene/ -o output/persons/ --mask-path masks/persons/
 <br>
 4. Overlay the PLY files on the base splat in LichtFeld
-
-
-
