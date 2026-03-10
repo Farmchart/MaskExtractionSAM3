@@ -15,20 +15,20 @@ Requirements:
 
 Usage:
     python extract_masks_sam3.py \
-        --image ./images/ \
-        --group plants "crop plants" \
+        --image ./data/images/ \
+        --group plants "plant" "grass" \
         --group persons "person" "human" \
         --fill-holes \
-        --out ./masks
+        --out ./data/masks
 
 
 Output:
     masks/
     ├── plants/          ← plants only — LichtFeld training run 1
-    │   ├── img_0.jpg.png
+    │   ├── img_0.jpg.jpg
     │   └── ...
     └── persons/         ← persons only — LichtFeld training run 2
-        ├── img_0.jpg.png
+        ├── img_0.jpg.jpg
         └── ...
 """
 
@@ -37,6 +37,7 @@ import sys
 import time
 import numpy as np
 import torch
+import torch.nn.functional as F
 from pathlib import Path
 from PIL import Image
 from huggingface_hub import hf_hub_download
@@ -54,15 +55,13 @@ def ensure_sam3(checkpoint: str = "sam3.pt"):
             )
     except ImportError:
         sys.exit("Run: pip install ultralytics>=8.3.237")
-    if not Path(checkpoint).exists():
-        hf_hub_download(repo_id="facebook/sam3", filename="sam3.pt", local_dir=str(Path(checkpoint).parent))
+    checkpoint_path = Path(checkpoint)
+    if not checkpoint_path.exists():
+        hf_hub_download(repo_id="facebook/sam3", filename=checkpoint_path.name, local_dir=str(checkpoint_path.parent))
 
 
 def union_masks(masks: list[np.ndarray]) -> np.ndarray:
-    combined = np.zeros_like(masks[0], dtype=bool)
-    for m in masks:
-        combined |= m.astype(bool)
-    return combined
+    return np.logical_or.reduce(masks)
 
 
 def save_mask(mask: np.ndarray, out_path: Path):
@@ -72,9 +71,8 @@ def save_mask(mask: np.ndarray, out_path: Path):
 
 # ── SAM3 inference ────────────────────────────────────────────────────────────
 
-def run_text_mode(predictor, image_path: str, prompts: list[str], orig_size: tuple[int, int]) -> list[np.ndarray]:
+def run_text_mode(predictor, prompts: list[str], orig_size: tuple[int, int]) -> list[np.ndarray]:
     orig_w, orig_h = orig_size
-    predictor.set_image(image_path)
     results = predictor(text=prompts)
 
     masks = []
@@ -82,9 +80,12 @@ def run_text_mode(predictor, image_path: str, prompts: list[str], orig_size: tup
         if result.masks is None:
             continue
         for mask_tensor in result.masks.data:
-            mask = mask_tensor.cpu().numpy().astype(np.uint8)
-            mask = np.array(Image.fromarray(mask).resize((orig_w, orig_h), Image.NEAREST))
-            masks.append(mask.astype(bool))
+            mask = F.interpolate(
+                mask_tensor.unsqueeze(0).unsqueeze(0).float(),
+                size=(orig_h, orig_w),
+                mode="nearest"
+            )[0, 0].bool().cpu().numpy()
+            masks.append(mask)
     return masks
 
 
@@ -95,19 +96,20 @@ def process_image(image_path: Path, groups: list[tuple[str, list[str]]],
     print(f"\n[SAM3] {image_path.name}")
     filename = image_path.name + image_path.suffix  # COLMAP convention: img.jpg → img.jpg.jpg
 
-    img = Image.open(image_path)
-    orig_size = img.size  # (width, height)
+    with Image.open(image_path) as img:
+        orig_size = img.size  # (width, height)
+
+    predictor.set_image(str(image_path))
     group_masks: dict[str, np.ndarray] = {}
 
     # Pass 1: run inference for all groups
     for group_name, prompts in groups:
         print(f"    [{group_name}] prompts: {prompts}")
-        masks = run_text_mode(predictor, str(image_path), prompts, orig_size)
+        masks = run_text_mode(predictor, prompts, orig_size)
 
         if not masks:
             print(f"    [{group_name}] no masks found — writing empty mask")
-            blank = np.zeros((img.height, img.width), dtype=bool)
-            group_masks[group_name] = blank
+            group_masks[group_name] = np.zeros((orig_size[1], orig_size[0]), dtype=bool)
         else:
             print(f"    [{group_name}] {len(masks)} mask(s), merging...")
             group_masks[group_name] = union_masks(masks)
@@ -182,7 +184,10 @@ def main():
 
     _start = time.time()
     from ultralytics.models.sam import SAM3SemanticPredictor
-    overrides = dict(conf=args.conf, task="segment", mode="predict", model=args.checkpoint, device=device, save=False)
+    # NOTE: imgsz must be divisible by 14
+    overrides = dict(conf=args.conf, task="segment", mode="predict", model=args.checkpoint, device=device,
+                     save=False, 
+                     imgsz=644)
     predictor = SAM3SemanticPredictor(overrides=overrides)
 
     out_dir = Path(args.out)
