@@ -93,7 +93,7 @@ def run_text_mode(predictor, image_path: str, prompts: list[str], orig_size: tup
 def process_image(image_path: Path, groups: list[tuple[str, list[str]]],
                   out_dir: Path, predictor, fill_holes: bool = False, dilate: int = 0):
     print(f"\n[SAM3] {image_path.name}")
-    filename = image_path.name + ".png"  # COLMAP convention: img.jpg → img.jpg.png
+    filename = image_path.name + image_path.suffix  # COLMAP convention: img.jpg → img.jpg.jpg
 
     img = Image.open(image_path)
     orig_size = img.size  # (width, height)
