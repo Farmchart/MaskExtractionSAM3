@@ -104,14 +104,14 @@ def process_image(image_path: Path, groups: list[tuple[str, list[str]]],
 
     # Pass 1: run inference for all groups
     for group_name, prompts in groups:
-        print(f"    [{group_name}] prompts: {prompts}")
+        print(f"\t[{group_name}] prompts: {prompts}")
         masks = run_text_mode(predictor, prompts, orig_size)
 
         if not masks:
-            print(f"    [{group_name}] no masks found — writing empty mask")
+            print(f"\t[{group_name}] no masks found — writing empty mask")
             group_masks[group_name] = np.zeros((orig_size[1], orig_size[0]), dtype=bool)
         else:
-            print(f"    [{group_name}] {len(masks)} mask(s), merging...")
+            print(f"\t[{group_name}] {len(masks)} mask(s), merging...")
             group_masks[group_name] = union_masks(masks)
 
     # Pass 2: postprocess, subtract other groups, save
@@ -208,7 +208,7 @@ def main():
         sys.exit(f"Path not found: {args.image}")
 
     print(f"\nDone in {time.time() - _start:.1f} seconds!")
-    print(f"    Masks saved to:\n    {out_dir.resolve()}")
+    print(f"\tMasks saved to:\n\t{out_dir.resolve()}")
 
 if __name__ == "__main__":
     main()
