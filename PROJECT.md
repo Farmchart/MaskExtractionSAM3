@@ -2,21 +2,30 @@
 + Separation of area segmentation and object segmentation
 + Preset groups for common cases (e.g. plants, people, tractors, etc.)
 + Adjustable inference res for different objects, then downscale for priority subtraction
++ Continuous tracking of objects between frames for consistent masking
 
 # Main workflow (so far)
+
 Workflow:
+
 1. Generate masks
-    python extract_masks_sam3.py --image ./images/ \ <br>
-        --group plants "crop plants" "leaves" \ <br>
-        --group persons "person" "human"
-<br>
+```bash
+python extract_masks_sam3.py --image ./images/ \
+    --group plants "crop plants" "leaves" \
+    --group persons "person" "human"
+```
+
 2. Run COLMAP
-    colmap feature_extractor \ <br>
-        --database_path scene/database.db \ <br>
-        --image_path scene/images
-<br>
+```bash
+colmap feature_extractor \
+    --database_path scene/database.db \
+    --image_path scene/images
+```
+
 3. Train a splat per group in LichtFeld
-    ./LichtFeld-Studio -d scene/ -o output/plants/ --mask-path masks/plants/ <br>
-    ./LichtFeld-Studio -d scene/ -o output/persons/ --mask-path masks/persons/ <br>
-<br>
+```bash
+./LichtFeld-Studio -d scene/ -o output/plants/ --mask-path masks/plants/
+./LichtFeld-Studio -d scene/ -o output/persons/ --mask-path masks/persons/
+```
+
 4. Overlay the PLY files on the base splat in LichtFeld
