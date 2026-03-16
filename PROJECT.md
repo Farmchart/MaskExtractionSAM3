@@ -6,13 +6,13 @@
 # Main workflow (so far)
 Workflow:
 1. Generate masks
-    python extract_masks_sam3.py --image ./images/ \<br>
-        --group plants "crop plants" "leaves" \<br>
+    python extract_masks_sam3.py --image ./images/ \ <br>
+        --group plants "crop plants" "leaves" \ <br>
         --group persons "person" "human"
 <br>
 2. Run COLMAP
-    colmap feature_extractor \<br>
-        --database_path scene/database.db \<br>
+    colmap feature_extractor \ <br>
+        --database_path scene/database.db \ <br>
         --image_path scene/images
 <br>
 3. Train a splat per group in LichtFeld
