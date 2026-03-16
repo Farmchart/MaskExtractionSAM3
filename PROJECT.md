@@ -1,6 +1,7 @@
 # TODO
 + Separation of area segmentation and object segmentation
 + Preset groups for common cases (e.g. plants, people, tractors, etc.)
++ Adjustable inference res for different objects, then downscale for priority subtraction
 
 # Main workflow (so far)
 Workflow:
