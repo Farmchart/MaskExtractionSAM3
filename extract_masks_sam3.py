@@ -80,17 +80,8 @@ def run_text_mode(predictor, prompts: list[str], orig_size: tuple[int, int]) -> 
         if result.masks is None:
             continue
         for mask_tensor in result.masks.data:
-            # cropping padding
-            inf_h, inf_w = mask_tensor.shape[-2], mask_tensor.shape[-1]
-            scale = min(inf_h / orig_h, inf_w / orig_w)
-            content_h = round(orig_h * scale)
-            content_w = round(orig_w * scale)
-            pad_top  = (inf_h - content_h) // 2
-            pad_left = (inf_w - content_w) // 2
-            cropped  = mask_tensor[pad_top:pad_top + content_h,
-                                   pad_left:pad_left + content_w]
             mask = F.interpolate(
-                cropped.unsqueeze(0).unsqueeze(0).float(),
+                mask_tensor.unsqueeze(0).unsqueeze(0).float(),
                 size=(orig_h, orig_w),
                 mode="nearest"
             )[0, 0].bool().cpu().numpy()
